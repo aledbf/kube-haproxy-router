@@ -19,12 +19,14 @@ package haproxy
 // Derived from the standard debian config
 const header = `
 global
-  log /dev/log    local0
-  log /dev/log    local1 notice
-  chroot /var/lib/haproxy
+  #log /dev/log    local0
+  #log /dev/log    local1 notice
+  #ulimit-n        108035
+  #maxconn 100000
+  #chroot /var/lib/haproxy
   stats socket /run/haproxy/admin.sock mode 660 level admin
   stats timeout 30s
-  daemon
+  #daemon
   # Default SSL material locations
   ca-base /etc/ssl/certs
   crt-base /etc/ssl/private
@@ -39,19 +41,31 @@ defaults
   mode    http
   option  httplog
   option  dontlognull
-  timeout connect 5000
-  timeout client  50000
-  timeout server  50000
-  errorfile 400 /usr/local/etc/haproxy/errors/400.http
-  errorfile 403 /usr/local/etc/haproxy/errors/403.http
-  errorfile 408 /usr/local/etc/haproxy/errors/408.http
-  errorfile 500 /usr/local/etc/haproxy/errors/500.http
-  errorfile 502 /usr/local/etc/haproxy/errors/502.http
-  errorfile 503 /usr/local/etc/haproxy/errors/503.http
-  errorfile 504 /usr/local/etc/haproxy/errors/504.http
+  option  forwardfor
+  option  redispatch
+  option  http-server-close
+  timeout connect 5s
+  timeout client  30s
+  timeout server  30s
+  timeout tunnel 1h
+  #errorfile 400 /usr/local/etc/haproxy/errors/400.http
+  #errorfile 403 /usr/local/etc/haproxy/errors/403.http
+  #errorfile 408 /usr/local/etc/haproxy/errors/408.http
+  #errorfile 500 /usr/local/etc/haproxy/errors/500.http
+  #errorfile 502 /usr/local/etc/haproxy/errors/502.http
+  #errorfile 503 /usr/local/etc/haproxy/errors/503.http
+  #errorfile 504 /usr/local/etc/haproxy/errors/504.http
+  balance leastconn
+  option  httpchk HEAD /health-check HTTP/1.1
+
+userlist users
+  user stats insecure-password statspassword
+
+listen stats :1936
+  stats uri /
+  stats enable
 
 frontend health_check
-  mode http
   bind :12345
   monitor-uri /healthz
 `

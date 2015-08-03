@@ -31,10 +31,12 @@ import (
 
 func (h *HAProxyManager) writeHTTPFrontend(services []cluster.Service, writer io.Writer) {
 	fmt.Fprintf(writer, "frontend www\n")
-	fmt.Fprintf(writer, "    bind :%d\n", 80)
+	fmt.Fprintf(writer, "\tbind :%d\n", 80)
+	fmt.Fprintf(writer, "\ttcp-request inspect-delay 5s\n")
+  fmt.Fprintf(writer, "\ttcp-request content accept if HTTP\n")
 	for _, record := range services {
 		if record.RealName != "" {
-			fmt.Fprintf(writer, "    acl acl_%s\thdr_beg(host) %s.%s\n", record.RealName, record.RealName, h.DomainName)
+			fmt.Fprintf(writer, "\tacl acl_%s\thdr(host) %s.%s\n", record.RealName, record.RealName, h.DomainName)
 		}
 	}
 
@@ -42,23 +44,21 @@ func (h *HAProxyManager) writeHTTPFrontend(services []cluster.Service, writer io
 
 	for _, record := range services {
 		if record.RealName != "" {
-			fmt.Fprintf(writer, "    use_backend\t%s_backend\tif acl_%s\n", record.RealName, record.RealName)
+			fmt.Fprintf(writer, "\tuse_backend\t%s\tif acl_%s\n", record.RealName, record.RealName)
 		}
 	}
 	fmt.Fprintf(writer, "\n")
 }
 
 func (h *HAProxyManager) writeHTTPBackend(record cluster.Service, writer io.Writer) {
-	fmt.Fprintf(writer, "backend %s_backend\n", record.RealName)
-	fmt.Fprintf(writer, "    mode http\n")
-	fmt.Fprintf(writer, "    balance leastconn\n")
+	fmt.Fprintf(writer, "backend %s\n", record.RealName)
 	for _, subset := range record.Ep {
-		fmt.Fprintf(writer, "    server %s\t%s:%d\tcheck\n", subset.String(), subset.Host, subset.Port)
+		fmt.Fprintf(writer, "\tserver %s\t%s:%d\tcheck\n", subset.String(), subset.Host, subset.Port)
 	}
 	fmt.Fprintf(writer, "\n")
 }
 
-func (h *HAProxyManager) updateHAProxy(services []cluster.Service) error {
+func (h *HAProxyManager) updateHAProxy(services []cluster.Service, dryrun bool) error {
 	rb := bytes.NewBuffer(nil)
 	wb := bytes.NewBuffer(nil)
 	buf := bufio.NewReadWriter(bufio.NewReader(rb), bufio.NewWriter(wb))
@@ -69,14 +69,16 @@ func (h *HAProxyManager) updateHAProxy(services []cluster.Service) error {
 	h.writeConfig(services, w)
 	buf.Flush()
 
-	glog.Info(string(wb.Bytes()))
-
-	writer, err := os.OpenFile(h.ConfigFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
-	if err != nil {
-		return err
+	if dryrun {
+		glog.Info(string(wb.Bytes()))
+	} else {
+		writer, err := os.OpenFile(h.ConfigFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+		if err != nil {
+			return err
+		}
+		defer writer.Close()
+		writer.Write(wb.Bytes())
 	}
-	defer writer.Close()
-	writer.Write(wb.Bytes())
 
 	return nil
 }
@@ -112,7 +114,7 @@ func (h *HAProxyManager) Check() error {
 }
 
 func (h *HAProxyManager) Sync(services []cluster.Service, dryrun bool) error {
-	err := h.updateHAProxy(services)
+	err := h.updateHAProxy(services, dryrun)
 	if err != nil {
 		return err
 	}
@@ -137,7 +139,7 @@ func (h *HAProxyManager) Sync(services []cluster.Service, dryrun bool) error {
 func (h *HAProxyManager) runCommandAndLog(cmd string, args ...string) error {
 	data, err := h.Exec.Command(cmd, args...).CombinedOutput()
 	if err != nil {
-		glog.Warning("Failed to run: %s %v", cmd, args)
+		glog.Warningf("Failed to run: %s %v", cmd, args)
 		glog.Warning(string(data))
 		return err
 	}

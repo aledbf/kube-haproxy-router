@@ -6,7 +6,7 @@ Internet -> nginx -> kube-proxy (service VIP and load balancer) -> pod
 
 with
 
-Internet -> kube-haproxy -> container
+Internet -> kube-haproxy -> pod
 
 Changes:
   - remove nginx
@@ -15,6 +15,5 @@ Changes:
   - use haproxy checks
 
 This borrow ideas from #12111 and #11679 from GoogleCloudPlatform/kubernetes
-
 
 kube-haproxy --server http://<kubernetes api master>:8080

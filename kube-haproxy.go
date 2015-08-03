@@ -18,6 +18,7 @@ package main
 
 import (
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"os"
 	"reflect"
@@ -31,26 +32,41 @@ import (
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/util"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/util/exec"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/util/workqueue"
+	haproxy_cluster "github.com/aledbf/kube-haproxy-router/cluster"
 	"github.com/aledbf/kube-haproxy-router/haproxy"
-	"github.com/aledbf/kube-haproxy-router/cluster"
 	"github.com/golang/glog"
 
 	flag "github.com/spf13/pflag"
 )
 
 const (
-	reloadQPS       = 10.0
-	resyncPeriod    = 10 * time.Second
-	healthzPort     = ":8082"
-	defaultHttpPort = 80
+	reloadQPS    = 10.0
+	resyncPeriod = 10 * time.Second
+	healthzPort  = 8081
 )
 
 var (
+	flags = flag.NewFlagSet("", flag.ContinueOnError)
+
 	// keyFunc for endpoints and services.
 	keyFunc = framework.DeletionHandlingMetaNamespaceKeyFunc
 
 	// Error used to indicate that a sync is deferred because the controller isn't ready yet
 	deferredSync = fmt.Errorf("Deferring sync till endpoints controller has synced.")
+
+	dry = flags.Bool("dry", false, `if set, a single dry run of configuration
+		parsing is executed. Results written to stdout.`)
+
+	cluster = flags.Bool("use-kubernetes-cluster-service", false, `If true, use the built in kubernetes
+		cluster for creating the client`)
+
+	httpPort  = flags.Int("http-port", 80, `Port to expose http services.`)
+	statsPort = flags.Int("stats-port", 1936, `Port for loadbalancer stats,
+		Used in the loadbalancer liveness probe.`)
+
+	domain = flags.String("domain", "local3.deisapp.com", "Cluster domain name")
+
+	master = flags.String("master", "http://localhost:8080", "kube api server url")
 )
 
 // loadBalancerController watches the kubernetes api and adds/removes services
@@ -70,18 +86,33 @@ type loadBalancerController struct {
 
 // getEndpoints returns a list of <endpoint ip>:<port> for a given service/target port combination.
 func (lbc *loadBalancerController) getEndpoints(
-	s *api.Service, targetPort int) (endpoints []cluster.HostPort) {
+	s *api.Service, servicePort *api.ServicePort) (endpoints []haproxy_cluster.HostPort) {
 	ep, err := lbc.epLister.GetServiceEndpoints(s)
 	if err != nil {
 		return
 	}
 
+	// The intent here is to create a union of all subsets that match a targetPort.
+	// We know the endpoint already matches the service, so all pod ips that have
+	// the target port are capable of service traffic for it.
 	for _, ss := range ep.Subsets {
-		for _, p := range ss.Ports {
-			if p.Port == targetPort {
-				for _, e := range ss.Addresses {
-					endpoints = append(endpoints, cluster.HostPort{e.IP, targetPort})
+		for _, epPort := range ss.Ports {
+			var targetPort int
+			switch servicePort.TargetPort.Kind {
+			case util.IntstrInt:
+				if epPort.Port == servicePort.TargetPort.IntVal {
+					targetPort = epPort.Port
 				}
+			case util.IntstrString:
+				if epPort.Name == servicePort.TargetPort.StrVal {
+					targetPort = epPort.Port
+				}
+			}
+			if targetPort == 0 {
+				continue
+			}
+			for _, epAddress := range ss.Addresses {
+				endpoints = append(endpoints, haproxy_cluster.HostPort{epAddress.IP, targetPort})
 			}
 		}
 	}
@@ -89,20 +120,20 @@ func (lbc *loadBalancerController) getEndpoints(
 }
 
 // getServices returns a list of services and their endpoints.
-func (lbc *loadBalancerController) getServices() (httpSvc []cluster.Service) {
+func (lbc *loadBalancerController) getServices() (httpSvc []haproxy_cluster.Service) {
 	services, _ := lbc.svcLister.List()
 	for _, s := range services.Items {
 		if s.Spec.Type == api.ServiceTypeLoadBalancer {
+			glog.Infof("Ignoring service %v, it already has a loadbalancer", s.Name)
 			continue
 		}
 		for _, servicePort := range s.Spec.Ports {
-			sName := s.Name
-			ep := lbc.getEndpoints(&s, servicePort.TargetPort.IntVal)
-			if len(ep) == 0 {
-				glog.Infof("No endpoints found for service %v, port %+v", sName, servicePort)
+			ep := lbc.getEndpoints(&s, &servicePort)
+			if s.Labels["name"] == "" {
 				continue
 			}
-			newSvc := cluster.Service{
+
+			newSvc := haproxy_cluster.Service{
 				Name:     s.Name,
 				Ep:       ep,
 				RealName: s.Labels["name"],
@@ -122,12 +153,17 @@ func (lbc *loadBalancerController) sync(dryRun bool) error {
 		return deferredSync
 	}
 	httpSvc := lbc.getServices()
-	if len(httpSvc) == 0 {
-		return nil
-	}
 
 	if err := lbc.haproxy.Sync(httpSvc, dryRun); err != nil {
 		return err
+	}
+
+	if len(httpSvc) == 0 {
+		return lbc.haproxy.Reload()
+	}
+
+	if dryRun {
+		return nil
 	}
 
 	lbc.reloadRateLimiter.Accept()
@@ -139,7 +175,7 @@ func (lbc *loadBalancerController) worker() {
 	for {
 		key, _ := lbc.queue.Get()
 		glog.Infof("Sync triggered by service %v", key)
-		if err := lbc.haproxy.Check(); err != nil {
+		if err := lbc.sync(false); err != nil {
 			glog.Infof("Requeuing %v because of error: %v", key, err)
 			lbc.queue.Add(key)
 		} else {
@@ -149,7 +185,8 @@ func (lbc *loadBalancerController) worker() {
 }
 
 // newLoadBalancerController creates a new controller from the given config.
-func newLoadBalancerController(c *client.Client, domain string) *loadBalancerController {
+func newLoadBalancerController(c *client.Client, namespace string,
+	domain string) *loadBalancerController {
 	mgr := &haproxy.HAProxyManager{
 		Exec:       exec.New(),
 		ConfigFile: "haproxy.cfg",
@@ -157,10 +194,12 @@ func newLoadBalancerController(c *client.Client, domain string) *loadBalancerCon
 	}
 
 	lbc := loadBalancerController{
-		client:            c,
-		queue:             workqueue.New(),
-		reloadRateLimiter: util.NewTokenBucketRateLimiter(reloadQPS, int(reloadQPS)),
-		haproxy:           mgr,
+		client: c,
+		queue:  workqueue.New(),
+		reloadRateLimiter: util.NewTokenBucketRateLimiter(
+			reloadQPS, int(reloadQPS)),
+		haproxy: mgr,
+		domain:  domain,
 	}
 
 	enqueue := func(obj interface{}) {
@@ -183,76 +222,74 @@ func newLoadBalancerController(c *client.Client, domain string) *loadBalancerCon
 	}
 
 	lbc.svcLister.Store, lbc.svcController = framework.NewInformer(
-		cache.NewListWatchFromClient(lbc.client, "services", api.NamespaceAll, fields.Everything()),
+		cache.NewListWatchFromClient(
+			lbc.client, "services", namespace, fields.Everything()),
 		&api.Service{}, resyncPeriod, eventHandlers)
 
 	lbc.epLister.Store, lbc.epController = framework.NewInformer(
-		cache.NewListWatchFromClient(lbc.client, "endpoints", api.NamespaceAll, fields.Everything()),
+		cache.NewListWatchFromClient(
+			lbc.client, "endpoints", namespace, fields.Everything()),
 		&api.Endpoints{}, resyncPeriod, eventHandlers)
 
-	lbc.domain = domain
 	return &lbc
 }
 
 // healthzServer services liveness probes.
 func healthzServer() {
 	http.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(200)
-		w.Write([]byte("ok"))
+		// Delegate a check to the haproxy stats service.
+		response, err := http.Get(fmt.Sprintf("http://localhost:%v", *statsPort))
+		if err != nil {
+			glog.Infof("Error %v", err)
+			w.WriteHeader(http.StatusInternalServerError)
+		} else {
+			defer response.Body.Close()
+			if response.StatusCode != http.StatusOK {
+				contents, err := ioutil.ReadAll(response.Body)
+				if err != nil {
+					glog.Infof("Error reading resonse on receiving status %v: %v",
+						response.StatusCode, err)
+				}
+				glog.Infof("%v\n", string(contents))
+				w.WriteHeader(response.StatusCode)
+			} else {
+				w.WriteHeader(200)
+				w.Write([]byte("ok"))
+			}
+		}
 	})
-	glog.Fatal(http.ListenAndServe(healthzPort, nil))
-}
-
-func dryRun(lbc *loadBalancerController) {
-	var err error
-	for err = lbc.sync(true); err == deferredSync; err = lbc.sync(true) {
-	}
-
-	if err != nil {
-		glog.Warningf("ERROR: %+v", err)
-	}
+	glog.Fatal(http.ListenAndServe(fmt.Sprintf(":%v", healthzPort), nil))
 }
 
 func main() {
-	flags := flag.NewFlagSet("", flag.ContinueOnError)
-
-	cluster := flags.Bool("use-kubernetes-cluster-service", false,
-		"if set, use the built in kubernetes cluster for creating the client")
-	domain := flags.String("domain", "local3.deisapp.com", "Cluster domain name")
-	dry := flags.Bool("dry", false,
-		"if set, a single dry run of configuration parsing is executed. Results written to stdout")
-	server := flags.String("server", "http://localhost:8080", "kube api server url")
-
 	flags.Parse(os.Args)
 
-	var c *client.Client
+	var kubeClient *client.Client
+
 	if *cluster {
 		clusterClient, err := client.NewInCluster()
 		if err != nil {
 			glog.Fatalf("Failed to create client: %v", err)
 		}
-		c = clusterClient
+		kubeClient = clusterClient
 	} else {
 		config := &client.Config{
-			Host: *server,
+			Host: *master,
 		}
 
-		client, err := client.New(config)
+		confClient, err := client.New(config)
 		if err != nil {
 			glog.Fatalf("Could not create api client %v", err)
 		}
-		c = client
+		kubeClient = confClient
 	}
+
+	lbc := newLoadBalancerController(kubeClient, "default", *domain)
 
 	go healthzServer()
 
-	lbc := newLoadBalancerController(c, *domain)
-
 	go lbc.epController.Run(util.NeverStop)
 	go lbc.svcController.Run(util.NeverStop)
-	if *dry {
-		dryRun(lbc)
-	} else {
-		util.Until(lbc.worker, time.Second, util.NeverStop)
-	}
+
+	util.Until(lbc.worker, time.Second, util.NeverStop)
 }
