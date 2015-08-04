@@ -1,5 +1,7 @@
-FROM haproxy:1.5
+FROM alpine:3.2
 
-RUN mkdir /run/haproxy
-RUN mkdir /var/lib/haproxy
+RUN apk add -U haproxy
+
+ADD haproxy-errors /haproxy-errors
+
 COPY kube-haproxy /kube-haproxy
