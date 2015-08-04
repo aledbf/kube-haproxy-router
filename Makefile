@@ -1,21 +1,23 @@
-all: push
 
-# Set this to the *next* version to prevent accidentally overwriting the existing image.
-# Next tag=0.3
-# Usage:
-#  tag with the current git hash:
-#   make TAG=`git log -1 --format="%H"`
-#  tag with a formal version
-#   make TAG=0.2
+REGISTRY = $(shell if [ "$$DEV_REGISTRY" == "registry.hub.docker.com" ]; then echo; else echo $$DEV_REGISTRY/; fi)
+GIT_SHA = $(shell git rev-parse --short HEAD)
+IMAGE = kube-haproxy-router:$(BUILD_TAG)
+DEV_IMAGE = $(REGISTRY)$(IMAGE)
 
-kube-haproxy: kube-haproxy.go
-	CGO_ENABLED=0 go build -a -installsuffix cgo -ldflags '-w' ./kube-haproxy.go
+ifndef BUILD_TAG
+  BUILD_TAG = git-$(GIT_SHA)
+endif
 
-container: kube-haproxy
-	docker build -t gcr.io/google_containers/kube-haproxy:$(TAG) .
+all: build
 
-push: container
-	gcloud docker push gcr.io/google_containers/kube-haproxy:$(TAG)
+build: kube-haproxy.go
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 godep go build -a -installsuffix cgo -ldflags '-w' ./kube-haproxy.go
+
+image: build
+	docker build -t $(IMAGE) .
+
+push: image
+	docker push $(IMAGE)
 
 clean:
 	rm -f kube-haproxy
