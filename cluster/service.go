@@ -7,9 +7,10 @@ import (
 // Service encapsulates a single backend entry in the load balancer config.
 // The Ep field contains the ip and ports of the pods that make up a service.
 type Service struct {
-  Name     string
-  Ep       []HostPort
-  RealName string
+  Name        string
+  Ep          []HostPort
+  RealName    string
+  ReturnsJson bool
 }
 
 // HostPort IP address and port where a pod expose a HTTP or TCP service
