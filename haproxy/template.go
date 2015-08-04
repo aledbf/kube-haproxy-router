@@ -19,14 +19,13 @@ package haproxy
 // Derived from the standard debian config
 const header = `
 global
-  #log /dev/log    local0
-  #log /dev/log    local1 notice
-  #ulimit-n        108035
-  #maxconn 100000
-  #chroot /var/lib/haproxy
-  stats socket /run/haproxy/admin.sock mode 660 level admin
+  log /dev/log    local0
+  log /dev/log    local1 notice
+  maxconn 100000
+  chroot /var/lib/haproxy
+  stats socket /run/haproxy.sock mode 660 level admin
   stats timeout 30s
-  #daemon
+  daemon
   # Default SSL material locations
   ca-base /etc/ssl/certs
   crt-base /etc/ssl/private
@@ -39,24 +38,25 @@ global
 defaults
   log     global
   mode    http
+  balance leastconn
+  option  redispatch
   option  httplog
   option  dontlognull
-  option  forwardfor
-  option  redispatch
   option  http-server-close
-  timeout connect 5s
-  timeout client  30s
-  timeout server  30s
-  timeout tunnel 1h
-  #errorfile 400 /usr/local/etc/haproxy/errors/400.http
-  #errorfile 403 /usr/local/etc/haproxy/errors/403.http
-  #errorfile 408 /usr/local/etc/haproxy/errors/408.http
-  #errorfile 500 /usr/local/etc/haproxy/errors/500.http
-  #errorfile 502 /usr/local/etc/haproxy/errors/502.http
-  #errorfile 503 /usr/local/etc/haproxy/errors/503.http
-  #errorfile 504 /usr/local/etc/haproxy/errors/504.http
-  balance leastconn
+  option  forwardfor except 127.0.0.0/8
   option  httpchk HEAD /health-check HTTP/1.1
+  timeout connect   5s
+  timeout client    30s
+  timeout server    30s
+  timeout tunnel    1h
+  timeout http-keep-alive 60s
+  retries 3
+  # default error files
+  errorfile 403 /haproxy-errors/html/403.http
+  errorfile 408 /haproxy-errors/html/408.http
+  errorfile 502 /haproxy-errors/html/502.http
+  errorfile 503 /haproxy-errors/html/503.http
+  errorfile 504 /haproxy-errors/html/504.http
 
 userlist users
   user stats insecure-password statspassword
