@@ -29,6 +29,14 @@ import (
 	"github.com/golang/glog"
 )
 
+func (h *HAProxyManager) writeJsonErrorFile(writer io.Writer) {
+  fmt.Fprintf(writer, "\terrorfile 403 /haproxy-errors/json/403.http\n")
+  fmt.Fprintf(writer, "\terrorfile 408 /haproxy-errors/json/408.http\n")
+  fmt.Fprintf(writer, "\terrorfile 502 /haproxy-errors/json/502.http\n")
+  fmt.Fprintf(writer, "\terrorfile 503 /haproxy-errors/json/503.http\n")
+  fmt.Fprintf(writer, "\terrorfile 504 /haproxy-errors/json/504.http\n")
+}
+
 func (h *HAProxyManager) writeHTTPFrontend(services []cluster.Service, writer io.Writer) {
 	fmt.Fprintf(writer, "frontend www\n")
 	fmt.Fprintf(writer, "\tbind :%d\n", 80)
@@ -52,6 +60,9 @@ func (h *HAProxyManager) writeHTTPFrontend(services []cluster.Service, writer io
 
 func (h *HAProxyManager) writeHTTPBackend(record cluster.Service, writer io.Writer) {
 	fmt.Fprintf(writer, "backend %s\n", record.RealName)
+	if record.ReturnsJson{
+		h.writeJsonErrorFile(writer)
+	}
 	for _, subset := range record.Ep {
 		fmt.Fprintf(writer, "\tserver %s\t%s:%d\tcheck\n", subset.String(), subset.Host, subset.Port)
 	}
