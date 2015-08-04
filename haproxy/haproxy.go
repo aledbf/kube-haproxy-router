@@ -17,92 +17,52 @@ limitations under the License.
 package haproxy
 
 import (
-	"bufio"
-	"bytes"
-	"fmt"
 	"io"
 	"io/ioutil"
 	"os"
-	"text/tabwriter"
+	"text/template"
 
 	"github.com/aledbf/kube-haproxy-router/cluster"
+
+	"github.com/GoogleCloudPlatform/kubernetes/pkg/util/exec"
 	"github.com/golang/glog"
 )
 
-func (h *HAProxyManager) writeJsonErrorFile(writer io.Writer) {
-  fmt.Fprintf(writer, "\terrorfile 403 /haproxy-errors/json/403.http\n")
-  fmt.Fprintf(writer, "\terrorfile 408 /haproxy-errors/json/408.http\n")
-  fmt.Fprintf(writer, "\terrorfile 502 /haproxy-errors/json/502.http\n")
-  fmt.Fprintf(writer, "\terrorfile 503 /haproxy-errors/json/503.http\n")
-  fmt.Fprintf(writer, "\terrorfile 504 /haproxy-errors/json/504.http\n")
+type HAProxyManager struct {
+	Exec       exec.Interface
+	ConfigFile string
+	HTTPPort   int
+	DomainName string
 }
 
-func (h *HAProxyManager) writeHTTPFrontend(services []cluster.Service, writer io.Writer) {
-	fmt.Fprintf(writer, "frontend www\n")
-	fmt.Fprintf(writer, "\tbind :%d\n", 80)
-	fmt.Fprintf(writer, "\ttcp-request inspect-delay 5s\n")
-  fmt.Fprintf(writer, "\ttcp-request content accept if HTTP\n")
-	for _, record := range services {
-		if record.RealName != "" {
-			fmt.Fprintf(writer, "\tacl acl_%s\thdr(host) %s.%s\n", record.RealName, record.RealName, h.DomainName)
-		}
-	}
-
-	fmt.Fprint(writer, "\n")
-
-	for _, record := range services {
-		if record.RealName != "" {
-			fmt.Fprintf(writer, "\tuse_backend\t%s\tif acl_%s\n", record.RealName, record.RealName)
-		}
-	}
-	fmt.Fprintf(writer, "\n")
+type haproxyTmpl struct {
+	Services   []cluster.Service
+	Nodes      []string
+	DomainName string
 }
 
-func (h *HAProxyManager) writeHTTPBackend(record cluster.Service, writer io.Writer) {
-	fmt.Fprintf(writer, "backend %s\n", record.RealName)
-	if record.ReturnsJson{
-		h.writeJsonErrorFile(writer)
-	}
-	for _, subset := range record.Ep {
-		fmt.Fprintf(writer, "\tserver %s\t%s:%d\tcheck\n", subset.String(), subset.Host, subset.Port)
-	}
-	fmt.Fprintf(writer, "\n")
-}
-
-func (h *HAProxyManager) updateHAProxy(services []cluster.Service, dryrun bool) error {
-	rb := bytes.NewBuffer(nil)
-	wb := bytes.NewBuffer(nil)
-	buf := bufio.NewReadWriter(bufio.NewReader(rb), bufio.NewWriter(wb))
-
-	w := new(tabwriter.Writer)
-	w.Init(buf, 1, 8, 1, '\t', tabwriter.TabIndent)
-
-	h.writeConfig(services, w)
-	buf.Flush()
-
-	if dryrun {
-		glog.Info(string(wb.Bytes()))
+func (h *HAProxyManager) buildConf(services []cluster.Service, nodes []string, dryRun bool) error {
+	var w io.Writer
+	var err error
+	if dryRun {
+		w = os.Stdout
 	} else {
-		writer, err := os.OpenFile(h.ConfigFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+		w, err = os.Create(h.ConfigFile)
 		if err != nil {
 			return err
 		}
-		defer writer.Close()
-		writer.Write(wb.Bytes())
 	}
 
-	return nil
-}
-
-func (h *HAProxyManager) writeConfig(services []cluster.Service, writer io.Writer) {
-	io.WriteString(writer, header)
-	io.WriteString(writer, "\n")
-	if len(services) > 0 {
-		h.writeHTTPFrontend(services, writer)
-		for _, serviceRecord := range services {
-			h.writeHTTPBackend(serviceRecord, writer)
-		}
+	t, err := template.ParseFiles("haproxy.tmpl")
+	if err != nil {
+		return err
 	}
+
+	return t.Execute(w, &haproxyTmpl{
+		Services:   services,
+		Nodes:      nodes,
+		DomainName: h.DomainName,
+	})
 }
 
 func (h *HAProxyManager) Reload() error {
@@ -124,8 +84,8 @@ func (h *HAProxyManager) Check() error {
 	return h.runCommandAndLog("haproxy", "-f", h.ConfigFile, "-c")
 }
 
-func (h *HAProxyManager) Sync(services []cluster.Service, dryrun bool) error {
-	err := h.updateHAProxy(services, dryrun)
+func (h *HAProxyManager) Sync(services []cluster.Service, nodes []string, dryrun bool) error {
+	err := h.buildConf(services, nodes, dryrun)
 	if err != nil {
 		return err
 	}

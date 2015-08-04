@@ -2,11 +2,11 @@
 
 Replace nginx to avoid kube-proxy to reach a pod.
 
-`Internet -> Nginx -> kube-proxy -> iptales (ip service) -> flannel -> docker bridge -> node (listen port app in go doing lb) -> pod/s`
+`Internet-> Nginx -> kube-proxy -> iptables (VIP) -> flannel -> docker bridge -> go LB -> pod/s`
 
 with
 
-`Internet -> kube-haproxy -> pod/s`
+`Internet -> kube-haproxy -> flannel -> docker bridge -> pod/s`
 
 Changes:
   - remove nginx
@@ -27,5 +27,6 @@ docker run \
   aledbf/kube-haproxy-router:0.0.1 \
   /kube-haproxy \
   --master http://$(etcdctl get /deis/scheduler/k8s/master):8080 \
-  --domain=$(etcdctl get /deis/platform/domain)
+  --domain=$(etcdctl get /deis/platform/domain) \
+  --machines=$(fleetctl list-machines -fields=ip -no-legend | xargs | sed -e 's/ /,/g')
 ```

@@ -1,8 +1,6 @@
 
-REGISTRY = $(shell if [ "$$DEV_REGISTRY" == "registry.hub.docker.com" ]; then echo; else echo $$DEV_REGISTRY/; fi)
 GIT_SHA = $(shell git rev-parse --short HEAD)
-IMAGE = kube-haproxy-router:$(BUILD_TAG)
-DEV_IMAGE = $(REGISTRY)$(IMAGE)
+IMAGE = aledbf/kube-haproxy-router:$(BUILD_TAG)
 
 ifndef BUILD_TAG
   BUILD_TAG = git-$(GIT_SHA)
@@ -17,6 +15,9 @@ image: build
 	docker build -t $(IMAGE) .
 
 push: image
+	docker push $(IMAGE)
+
+publish: image
 	docker push $(IMAGE)
 
 clean:

@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"os"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/api"
@@ -67,6 +68,8 @@ var (
 	domain = flags.String("domain", "local3.deisapp.com", "Cluster domain name")
 
 	master = flags.String("master", "http://localhost:8080", "kube api server url")
+
+	nodes = flags.String("nodes", "", "cluster host separated by commas")
 )
 
 // loadBalancerController watches the kubernetes api and adds/removes services
@@ -82,6 +85,7 @@ type loadBalancerController struct {
 	template          string
 	domain            string
 	haproxy           *haproxy.HAProxyManager
+	clusterNodes      []string
 }
 
 // getEndpoints returns a list of <endpoint ip>:<port> for a given service/target port combination.
@@ -153,8 +157,7 @@ func (lbc *loadBalancerController) sync(dryRun bool) error {
 		return deferredSync
 	}
 	httpSvc := lbc.getServices()
-
-	if err := lbc.haproxy.Sync(httpSvc, dryRun); err != nil {
+	if err := lbc.haproxy.Sync(httpSvc, lbc.clusterNodes, dryRun); err != nil {
 		return err
 	}
 
@@ -186,7 +189,7 @@ func (lbc *loadBalancerController) worker() {
 
 // newLoadBalancerController creates a new controller from the given config.
 func newLoadBalancerController(c *client.Client, namespace string,
-	domain string) *loadBalancerController {
+	domain string, nodes []string) *loadBalancerController {
 	mgr := &haproxy.HAProxyManager{
 		Exec:       exec.New(),
 		ConfigFile: "haproxy.cfg",
@@ -194,12 +197,12 @@ func newLoadBalancerController(c *client.Client, namespace string,
 	}
 
 	lbc := loadBalancerController{
-		client: c,
-		queue:  workqueue.New(),
-		reloadRateLimiter: util.NewTokenBucketRateLimiter(
-			reloadQPS, int(reloadQPS)),
-		haproxy: mgr,
-		domain:  domain,
+		client:            c,
+		queue:             workqueue.New(),
+		reloadRateLimiter: util.NewTokenBucketRateLimiter(reloadQPS, int(reloadQPS)),
+		haproxy:           mgr,
+		domain:            domain,
+		clusterNodes:      nodes,
 	}
 
 	enqueue := func(obj interface{}) {
@@ -247,8 +250,7 @@ func healthzServer() {
 			if response.StatusCode != http.StatusOK {
 				contents, err := ioutil.ReadAll(response.Body)
 				if err != nil {
-					glog.Infof("Error reading resonse on receiving status %v: %v",
-						response.StatusCode, err)
+					glog.Infof("Error reading resonse on receiving status %v: %v", response.StatusCode, err)
 				}
 				glog.Infof("%v\n", string(contents))
 				w.WriteHeader(response.StatusCode)
@@ -284,7 +286,7 @@ func main() {
 		kubeClient = confClient
 	}
 
-	lbc := newLoadBalancerController(kubeClient, "default", *domain)
+	lbc := newLoadBalancerController(kubeClient, "default", *domain, strings.Split(*nodes, ","))
 
 	go healthzServer()
 
