@@ -66,9 +66,8 @@ backend deis.{{ $domainName }}
   errorfile 502 /haproxy-errors/json/502.http
   errorfile 503 /haproxy-errors/json/503.http
   errorfile 504 /haproxy-errors/json/504.http
-{{ range .Nodes }}
-  server {{ . }} {{ . }}:8000 check
-{{ end }}
+  {{ range .Nodes }}server {{ . }} {{ . }}:8000 check
+  {{ end }}
 
 {{ range $record := .Services }}
 backend {{ $record.RealName}}{{ if $record.ReturnsJson}}
