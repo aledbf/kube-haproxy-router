@@ -20,7 +20,6 @@ defaults
   mode    http
   balance leastconn
   option  redispatch
-  option  httplog
   option  dontlognull
   option  http-server-close
   option  forwardfor
@@ -45,8 +44,8 @@ listen stats :1936
   stats enable
 
 listen deis-builder *:2222
-  mode tcp{{ range .Nodes }}
-  option tcp-check
+  mode tcp
+  option tcp-check{{ range .Nodes }}
   server {{ . }} {{ . }}:2223 check
   {{ end }}
 
@@ -72,7 +71,7 @@ backend deis.{{ $domainName }}
   {{ end }}
 
 {{ range $record := .Services }}
-backend {{ $record.RealName}}{{ if $record.ReturnsJson}}
+backend {{ $record.RealName }}{{ if $record.ReturnsJson }}
   errorfile 403 /haproxy-errors/json/403.http
   errorfile 408 /haproxy-errors/json/408.http
   errorfile 502 /haproxy-errors/json/502.http

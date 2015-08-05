@@ -131,20 +131,22 @@ func (lbc *loadBalancerController) getEndpoints(
 func (lbc *loadBalancerController) getServices() (httpSvc []haproxy_cluster.Service) {
 	services, _ := lbc.svcLister.List()
 	for _, s := range services.Items {
-		if s.Spec.Type == api.ServiceTypeLoadBalancer {
-			glog.Infof("Ignoring service %v, it already has a loadbalancer", s.Name)
-			continue
-		}
 		for _, servicePort := range s.Spec.Ports {
 			ep := lbc.getEndpoints(&s, &servicePort)
 			if s.Labels["name"] == "" {
 				continue
 			}
 
+			returnsJsonContent := false
+			if s.Labels["content"] == "json" {
+				returnsJsonContent = true
+			}
+
 			newSvc := haproxy_cluster.Service{
-				Name:     s.Name,
-				Ep:       ep,
-				RealName: s.Labels["name"],
+				Name:        s.Name,
+				Ep:          ep,
+				RealName:    s.Labels["name"],
+				ReturnsJson: returnsJsonContent,
 			}
 
 			httpSvc = append(httpSvc, newSvc)

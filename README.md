@@ -2,7 +2,7 @@
 
 Replace nginx to avoid kube-proxy to reach a pod.
 
-`Internet-> Nginx -> kube-proxy -> iptables (VIP) -> flannel -> docker bridge -> go LB -> pod/s`
+`Internet-> Nginx -> iptables (VIP) -> kube-proxy -> go LB -> flannel -> docker bridge -> pod/s`
 
 with
 
@@ -14,7 +14,12 @@ with
   - use the name of the application (hostname) to route traffic
   - use haproxy checks
 
-This borrow ideas in #12111 and #11679 from `GoogleCloudPlatform/kubernetes`
+This borrow ideas from #12111 and #11679 in `github.com/GoogleCloudPlatform/kubernetes`
+
+**Content type**
+
+Some applications, like a REST API always return json content. In this cases it makes sense to also return error (404,408,502,503 and 504) in the same format.
+Any `kubernetes` service with the label `content=json` will return a json response in case of an error.
 
 ```
 docker run \
@@ -31,3 +36,4 @@ docker run \
   --domain=$(etcdctl get /deis/platform/domain) \
   --nodes=$(fleetctl list-machines -fields=ip -no-legend | xargs | sed -e 's/ /,/g')
 ```
+
