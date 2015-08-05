@@ -260,6 +260,12 @@ func healthzServer() {
 			}
 		}
 	})
+
+	http.HandleFunc("/health-check", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+		w.Write([]byte("ok"))
+	})
+
 	glog.Fatal(http.ListenAndServe(fmt.Sprintf(":%v", healthzPort), nil))
 }
 

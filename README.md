@@ -22,11 +22,13 @@ docker run \
   --name kube-haproxy \
   --rm \
   -p 80:80 \
+  -p 443:443 \
   -p 1936:1936 \
+  -p 2222:2222 \
   -p 8081:8081 \
-  aledbf/kube-haproxy-router:0.0.1 \
+  aledbf/kube-haproxy-router:v0.0.1 \
   /kube-haproxy \
   --master http://$(etcdctl get /deis/scheduler/k8s/master):8080 \
   --domain=$(etcdctl get /deis/platform/domain) \
-  --machines=$(fleetctl list-machines -fields=ip -no-legend | xargs | sed -e 's/ /,/g')
+  --nodes=$(fleetctl list-machines -fields=ip -no-legend | xargs | sed -e 's/ /,/g')
 ```
