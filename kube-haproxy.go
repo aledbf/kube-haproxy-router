@@ -72,6 +72,8 @@ var (
 	master = flags.String("master", "http://localhost:8080", "kube api server url")
 
 	nodes = flags.String("nodes", "", "cluster host separated by commas")
+
+	defaultIndex []byte
 )
 
 // loadBalancerController watches the kubernetes api and adds/removes services
@@ -268,7 +270,21 @@ func healthzServer() {
 		w.Write([]byte("ok"))
 	})
 
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+		w.Write(getDefaultIndex())
+	})
+
 	glog.Fatal(http.ListenAndServe(fmt.Sprintf(":%v", healthzPort), nil))
+}
+
+func getDefaultIndex() []byte {
+	if len(defaultIndex) > 0 {
+		return defaultIndex
+	}
+
+	defaultIndex, _ = ioutil.ReadFile("haproxy-errors/index.http")
+	return defaultIndex
 }
 
 func main() {

@@ -17,7 +17,7 @@ ExecStart=docker run \
   /kube-haproxy \
   --master http://$(etcdctl get /deis/scheduler/k8s/master):8080 \
   --domain=$(etcdctl get /deis/platform/domain) \
-  --machines=$(fleetctl list-machines -fields=ip -no-legend | xargs | sed -e 's/ /,/g')
+  --nodes=$(fleetctl list-machines -fields=ip -no-legend | xargs | sed -e 's/ /,/g')
 
 Restart=on-failure
 RestartSec=5
