@@ -1,6 +1,6 @@
 FROM alpine:3.2
 
-RUN apk add -U haproxy
+RUN apk add -U haproxy bash curl
 
 ADD haproxy-errors /haproxy-errors
 

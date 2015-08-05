@@ -8,14 +8,13 @@ with
 
 `Internet -> kube-haproxy -> flannel -> docker bridge -> pod/s`
 
-Changes:
+**Changes:**
   - remove nginx
   - do not use service VIP to reach a pod
   - use the name of the application (hostname) to route traffic
   - use haproxy checks
 
-This borrow ideas from #12111 and #11679 from GoogleCloudPlatform/kubernetes
-
+This borrow ideas in #12111 and #11679 from `GoogleCloudPlatform/kubernetes`
 
 ```
 docker run \
