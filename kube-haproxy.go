@@ -37,6 +37,8 @@ import (
 	"github.com/aledbf/kube-haproxy-router/haproxy"
 	"github.com/golang/glog"
 
+	_ "net/http/pprof"
+
 	flag "github.com/spf13/pflag"
 )
 
@@ -144,7 +146,7 @@ func (lbc *loadBalancerController) getServices() (httpSvc []haproxy_cluster.Serv
 			}
 
 			httpSvc = append(httpSvc, newSvc)
-			glog.Infof("Found service: %+v", newSvc)
+			glog.V(2).Infof("Found service: %+v", newSvc)
 		}
 	}
 	return
