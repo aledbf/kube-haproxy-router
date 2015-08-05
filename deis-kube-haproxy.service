@@ -1,0 +1,29 @@
+[Unit]
+Description=deis-kube-haproxy
+
+[Service]
+EnvironmentFile=/etc/environment
+TimeoutStartSec=5m
+ExecStartPre=/bin/sh -c "docker inspect deis-router >/dev/null 2>&1 && docker rm -f deis-router || true"
+ExecStart=docker run \
+  --name deis-router \
+  --rm \
+  -p 80:80 \
+  -p 443:443 \
+  -p 1936:1936 \
+  -p 2222:2222 \
+  -p 8081:8081 \
+  aledbf/kube-haproxy-router:0.0.1 \
+  /kube-haproxy \
+  --master http://$(etcdctl get /deis/scheduler/k8s/master):8080 \
+  --domain=$(etcdctl get /deis/platform/domain) \
+  --machines=$(fleetctl list-machines -fields=ip -no-legend | xargs | sed -e 's/ /,/g')
+
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+
+[X-Fleet]
+Conflicts=deis-router@*.service deis-kube-haproxy@*.service
