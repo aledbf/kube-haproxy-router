@@ -56,8 +56,10 @@ frontend www
   tcp-request content accept if HTTP
   {{ range $record := .Services }}
   {{ if ne $record.RealName "" }}acl acl_{{ $record.RealName }} hdr(host) {{ $record.RealName }}.{{ $domainName }}{{ end }}{{ end }}
+  acl acl_deis-controller  hdr(host) deis.{{ $domainName }}
   {{ range $record := .Services }}
   {{ if ne $record.RealName "" }}use_backend {{ $record.RealName }} if acl_{{ $record.RealName }}{{ end }}{{ end }}
+  use_backend deis.{{ $domainName }} if acl_deis-controller
   default_backend default-backend
 
 backend deis.{{ $domainName }}
@@ -78,8 +80,7 @@ backend {{ $record.RealName }}{{ if $record.ReturnsJson }}
   errorfile 503 /haproxy-errors/json/503.http
   errorfile 504 /haproxy-errors/json/504.http{{ end }}
   {{ range $pod := $record.Ep }}server {{ $pod }} {{ $pod.Host }}:{{ $pod.Port }} check inter 5s
-  {{ end }}
-{{ end }}
+  {{ end }}{{ end }}
 
 backend default-backend
   server localhost 127.0.0.1:8081 check
