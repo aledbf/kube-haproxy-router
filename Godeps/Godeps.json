@@ -123,6 +123,11 @@
 			"Rev": "fc2b8d3a73c4867e51861bbdd5ae3c1f0869dd6a"
 		},
 		{
+			"ImportPath": "github.com/openshift/origin/pkg/util/proc",
+			"Comment": "v1.0.4-97-gae9a539",
+			"Rev": "ae9a539ab057bc2e53805e976d4077b81d48e96f"
+		},
+		{
 			"ImportPath": "github.com/prometheus/client_golang/model",
 			"Comment": "0.6.0-17-g3b16b46",
 			"Rev": "3b16b46a713f181888e5e9a1205ccc34d6917fb9"

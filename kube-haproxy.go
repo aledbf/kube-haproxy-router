@@ -34,6 +34,7 @@ import (
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/util/exec"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/util/workqueue"
 	haproxy_cluster "github.com/aledbf/kube-haproxy-router/cluster"
+	"github.com/openshift/origin/pkg/util/proc"
 	"github.com/aledbf/kube-haproxy-router/haproxy"
 	"github.com/golang/glog"
 
@@ -291,6 +292,8 @@ func getDefaultIndex() []byte {
 
 func main() {
 	flags.Parse(os.Args)
+
+	proc.StartReaper()
 
 	var kubeClient *client.Client
 
