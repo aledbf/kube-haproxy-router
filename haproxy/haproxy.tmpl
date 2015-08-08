@@ -1,11 +1,10 @@
 global
-  log /dev/log    local0
-  log /dev/log    local1 notice
+  daemon
   maxconn 100000
-  chroot /var/lib/haproxy
+  log /dev/log local0 info
+  log /dev/log local0 notice
   stats socket /run/haproxy.sock mode 660 level admin
   stats timeout 30s
-  daemon
   # Default SSL material locations
   ca-base /etc/ssl/certs
   crt-base /etc/ssl/private
@@ -23,6 +22,7 @@ defaults
   option  dontlognull
   option  http-server-close
   option  forwardfor
+  option  httplog
   option  httpchk HEAD /health-check HTTP/1.0
   timeout connect   5s
   timeout client    30s
@@ -46,6 +46,7 @@ listen stats :1936
 listen deis-builder *:2222
   mode tcp
   option tcp-check{{ range .Nodes }}
+  option tcplog
   server {{ . }} {{ . }}:2223 check
   {{ end }}
 

@@ -30,6 +30,7 @@ docker run \
   -p 1936:1936 \
   -p 2222:2222 \
   -p 8081:8081 \
+  -v /dev/log:/dev/log \
   aledbf/kube-haproxy-router:v0.0.1 \
   /kube-haproxy \
   --master http://$(etcdctl get /deis/scheduler/k8s/master):8080 \
