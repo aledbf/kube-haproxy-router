@@ -156,6 +156,10 @@
 			"Rev": "67cbc198fd11dab704b214c1e629a97af392c085"
 		},
 		{
+			"ImportPath": "github.com/ziutek/syslog",
+			"Rev": "0e395dffb67b1423a648cba4031fc13b4d866b6b"
+		},
+		{
 			"ImportPath": "golang.org/x/crypto/ssh",
 			"Rev": "f7445b17d61953e333441674c2d11e91ae4559d3"
 		},

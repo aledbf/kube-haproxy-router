@@ -34,9 +34,9 @@ import (
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/util/exec"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/util/workqueue"
 	haproxy_cluster "github.com/aledbf/kube-haproxy-router/cluster"
-	"github.com/openshift/origin/pkg/util/proc"
 	"github.com/aledbf/kube-haproxy-router/haproxy"
 	"github.com/golang/glog"
+	"github.com/openshift/origin/pkg/util/proc"
 
 	_ "net/http/pprof"
 
@@ -313,6 +313,11 @@ func main() {
 			glog.Fatalf("Could not create api client %v", err)
 		}
 		kubeClient = confClient
+	}
+
+	err := haproxy.StartSyslogServer("/var/run/haproxy.log.sock")
+	if err != nil {
+		glog.Fatalf("Failed to start syslog server: %v", err)
 	}
 
 	lbc := newLoadBalancerController(kubeClient, "default", *domain, strings.Split(*nodes, ","))
