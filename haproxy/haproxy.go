@@ -24,8 +24,8 @@ import (
 
 	"github.com/aledbf/kube-haproxy-router/cluster"
 
-	"github.com/GoogleCloudPlatform/kubernetes/pkg/util/exec"
 	"github.com/golang/glog"
+	"k8s.io/kubernetes/pkg/util/exec"
 )
 
 type HAProxyManager struct {
