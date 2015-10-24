@@ -1,3 +1,8 @@
+## DEPRECATED 
+
+# The contents of this repository is in this  [kubernetes/contrib](https://github.com/kubernetes/contrib/tree/master/service-loadbalancer) repository
+
+
 # kube-haproxy-router
 
 Replace nginx to avoid kube-proxy to reach a pod.
