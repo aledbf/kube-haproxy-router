@@ -1,24 +1,29 @@
+all: push
 
-GIT_SHA = $(shell git rev-parse --short HEAD)
-IMAGE = aledbf/kube-haproxy-router:$(BUILD_TAG)
+# 0.0 shouldn't clobber any released builds
+TAG = 0.0
+BUILD_IMAGE = build-haproxy
+HAPROXY_IMAGE = aledbf/kube-haproxy
 
-ifndef BUILD_TAG
-  BUILD_TAG = git-$(GIT_SHA)
-endif
+server:
+	CGO_ENABLED=0 GOOS=linux godep go build -a -installsuffix cgo -ldflags '-w' -o service-loadbalancer ./service_loadbalancer.go ./controller.go ./ingress_controller.go ./service.go
 
-all: build
+container: server haproxy
+	docker build -t $(HAPROXY_IMAGE):$(TAG) .
 
-build: kube-haproxy.go
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 godep go build -a -installsuffix cgo -ldflags '-w' ./kube-haproxy.go
+push: container
+	echo "docker push $(HAPROXY_IMAGE):$(TAG)""
 
-image: build
-	docker build -t $(IMAGE) .
-
-push: image
-	docker push $(IMAGE)
-
-publish: image
-	docker push $(IMAGE)
+haproxy:
+	docker build -t $(BUILD_IMAGE):$(TAG) build
+	docker create --name $(BUILD_IMAGE) $(BUILD_IMAGE):$(TAG) true
+	# docker cp semantics changed between 1.7 and 1.8, so we cp the file to cwd and rename it.
+	docker cp $(BUILD_IMAGE):/work/x86_64/haproxy-1.6-r0.apk .
+	docker rm -f $(BUILD_IMAGE)
+	mv haproxy-1.6-r0.apk haproxy.apk
 
 clean:
-	rm -f kube-haproxy
+	rm -f service_loadbalancer haproxy.apk
+	# remove servicelb and contrib-haproxy images
+	docker rmi -f $(BUILD_IMAGE):$(TAG) || true
+	docker rmi -f $(HAPROXY_IMAGE):$(TAG) || true

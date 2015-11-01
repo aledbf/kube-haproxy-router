@@ -40,46 +40,16 @@ func TestAllProcs(t *testing.T) {
 }
 
 func TestCmdLine(t *testing.T) {
-	for _, tt := range []struct {
-		process int
-		want    []string
-	}{
-		{process: 26231, want: []string{"vim", "test.go", "+10"}},
-		{process: 26232, want: []string{}},
-	} {
-		p1, err := testProcess(tt.process)
-		if err != nil {
-			t.Fatal(err)
-		}
-		c1, err := p1.CmdLine()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !reflect.DeepEqual(tt.want, c1) {
-			t.Errorf("want cmdline %v, got %v", tt.want, c1)
-		}
+	p1, err := testProcess(26231)
+	if err != nil {
+		t.Fatal(err)
 	}
-}
-
-func TestExecutable(t *testing.T) {
-	for _, tt := range []struct {
-		process int
-		want    string
-	}{
-		{process: 26231, want: "/usr/bin/vim"},
-		{process: 26232, want: ""},
-	} {
-		p, err := testProcess(tt.process)
-		if err != nil {
-			t.Fatal(err)
-		}
-		exe, err := p.Executable()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !reflect.DeepEqual(tt.want, exe) {
-			t.Errorf("want absolute path to cmdline %v, got %v", tt.want, exe)
-		}
+	c, err := p1.CmdLine()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"vim", "test.go", "+10"}; !reflect.DeepEqual(want, c) {
+		t.Errorf("want cmdline %v, got %v", want, c)
 	}
 }
 
@@ -93,54 +63,7 @@ func TestFileDescriptors(t *testing.T) {
 		t.Fatal(err)
 	}
 	sort.Sort(byUintptr(fds))
-	if want := []uintptr{0, 1, 2, 3, 10}; !reflect.DeepEqual(want, fds) {
-		t.Errorf("want fds %v, got %v", want, fds)
-	}
-
-	p2, err := Self()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	fdsBefore, err := p2.FileDescriptors()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	s, err := os.Open("fixtures")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.Close()
-
-	fdsAfter, err := p2.FileDescriptors()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if len(fdsBefore)+1 != len(fdsAfter) {
-		t.Errorf("want fds %v+1 to equal %v", fdsBefore, fdsAfter)
-	}
-}
-
-func TestFileDescriptorTargets(t *testing.T) {
-	p1, err := testProcess(26231)
-	if err != nil {
-		t.Fatal(err)
-	}
-	fds, err := p1.FileDescriptorTargets()
-	if err != nil {
-		t.Fatal(err)
-	}
-	sort.Strings(fds)
-	var want = []string{
-		"../../symlinktargets/abc",
-		"../../symlinktargets/def",
-		"../../symlinktargets/ghi",
-		"../../symlinktargets/uvw",
-		"../../symlinktargets/xyz",
-	}
-	if !reflect.DeepEqual(want, fds) {
+	if want := []uintptr{0, 1, 2, 3, 4}; !reflect.DeepEqual(want, fds) {
 		t.Errorf("want fds %v, got %v", want, fds)
 	}
 

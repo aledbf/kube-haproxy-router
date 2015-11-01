@@ -76,8 +76,8 @@ func (c *FakePods) Delete(name string, options *api.DeleteOptions) error {
 	return err
 }
 
-func (c *FakePods) Watch(label labels.Selector, field fields.Selector, resourceVersion string) (watch.Interface, error) {
-	return c.Fake.InvokesWatch(NewWatchAction("pods", c.Namespace, label, field, resourceVersion))
+func (c *FakePods) Watch(label labels.Selector, field fields.Selector, opts api.ListOptions) (watch.Interface, error) {
+	return c.Fake.InvokesWatch(NewWatchAction("pods", c.Namespace, label, field, opts))
 }
 
 func (c *FakePods) Bind(binding *api.Binding) error {
@@ -92,13 +92,7 @@ func (c *FakePods) Bind(binding *api.Binding) error {
 }
 
 func (c *FakePods) UpdateStatus(pod *api.Pod) (*api.Pod, error) {
-	action := UpdateActionImpl{}
-	action.Verb = "update"
-	action.Resource = "pods"
-	action.Subresource = "status"
-	action.Object = pod
-
-	obj, err := c.Fake.Invokes(action, pod)
+	obj, err := c.Fake.Invokes(NewUpdateSubresourceAction("pods", "status", c.Namespace, pod), pod)
 	if obj == nil {
 		return nil, err
 	}

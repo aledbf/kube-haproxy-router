@@ -18,7 +18,6 @@ package unversioned
 
 import (
 	"bytes"
-	"crypto/tls"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -31,21 +30,22 @@ import (
 	"time"
 
 	"github.com/golang/glog"
-	"k8s.io/kubernetes/pkg/api"
 	"k8s.io/kubernetes/pkg/api/errors"
+	"k8s.io/kubernetes/pkg/api/unversioned"
 	"k8s.io/kubernetes/pkg/client/metrics"
+	"k8s.io/kubernetes/pkg/conversion/queryparams"
 	"k8s.io/kubernetes/pkg/fields"
 	"k8s.io/kubernetes/pkg/labels"
 	"k8s.io/kubernetes/pkg/runtime"
 	"k8s.io/kubernetes/pkg/util"
-	"k8s.io/kubernetes/pkg/util/httpstream"
+	"k8s.io/kubernetes/pkg/util/sets"
 	"k8s.io/kubernetes/pkg/watch"
 	watchjson "k8s.io/kubernetes/pkg/watch/json"
 )
 
 // specialParams lists parameters that are handled specially and which users of Request
 // are therefore not allowed to set manually.
-var specialParams = util.NewStringSet("timeout")
+var specialParams = sets.NewString("timeout")
 
 // HTTPClient is an interface for testing a request object.
 type HTTPClient interface {
@@ -307,13 +307,13 @@ type versionToResourceToFieldMapping map[string]resourceTypeToFieldMapping
 func (v versionToResourceToFieldMapping) filterField(apiVersion, resourceType, field, value string) (newField, newValue string, err error) {
 	rMapping, ok := v[apiVersion]
 	if !ok {
-		glog.Warningf("field selector: %v - %v - %v - %v: need to check if this is versioned correctly.", apiVersion, resourceType, field, value)
+		glog.Warningf("Field selector: %v - %v - %v - %v: need to check if this is versioned correctly.", apiVersion, resourceType, field, value)
 		return field, value, nil
 	}
 	newField, newValue, err = rMapping.filterField(resourceType, field, value)
 	if err != nil {
 		// This is only a warning until we find and fix all of the client's usages.
-		glog.Warningf("field selector: %v - %v - %v - %v: need to check if this is versioned correctly.", apiVersion, resourceType, field, value)
+		glog.Warningf("Field selector: %v - %v - %v - %v: need to check if this is versioned correctly.", apiVersion, resourceType, field, value)
 		return field, value, nil
 	}
 	return newField, newValue, nil
@@ -371,7 +371,7 @@ func (r *Request) FieldsSelectorParam(s fields.Selector) *Request {
 		r.err = err
 		return r
 	}
-	return r.setParam(api.FieldSelectorQueryParam(r.apiVersion), s2.String())
+	return r.setParam(unversioned.FieldSelectorQueryParam(r.apiVersion), s2.String())
 }
 
 // LabelsSelectorParam adds the given selector as a query parameter
@@ -385,7 +385,7 @@ func (r *Request) LabelsSelectorParam(s labels.Selector) *Request {
 	if s.Empty() {
 		return r
 	}
-	return r.setParam(api.LabelSelectorQueryParam(r.apiVersion), s.String())
+	return r.setParam(unversioned.LabelSelectorQueryParam(r.apiVersion), s.String())
 }
 
 // UintParam creates a query parameter with the given value.
@@ -402,6 +402,31 @@ func (r *Request) Param(paramName, s string) *Request {
 		return r
 	}
 	return r.setParam(paramName, s)
+}
+
+// VersionedParams will take the provided object, serialize it to a map[string][]string using the
+// implicit RESTClient API version and the provided object convertor, and then add those as parameters
+// to the request. Use this to provide versioned query parameters from client libraries.
+func (r *Request) VersionedParams(obj runtime.Object, convertor runtime.ObjectConvertor) *Request {
+	if r.err != nil {
+		return r
+	}
+	versioned, err := convertor.ConvertToVersion(obj, r.apiVersion)
+	if err != nil {
+		r.err = err
+		return r
+	}
+	params, err := queryparams.Convert(versioned)
+	if err != nil {
+		r.err = err
+		return r
+	}
+	for k, v := range params {
+		for _, vv := range v {
+			r.setParam(k, vv)
+		}
+	}
+	return r
 }
 
 func (r *Request) setParam(paramName, value string) *Request {
@@ -434,11 +459,24 @@ func (r *Request) Timeout(d time.Duration) *Request {
 	return r
 }
 
+// Timeout makes the request use the given duration as a timeout. Sets the "timeoutSeconds"
+// parameter.
+func (r *Request) TimeoutSeconds(d time.Duration) *Request {
+	if r.err != nil {
+		return r
+	}
+	if d != 0 {
+		timeout := int64(d.Seconds())
+		r.Param("timeoutSeconds", strconv.FormatInt(timeout, 10))
+	}
+	return r
+}
+
 // Body makes the request use obj as the body. Optional.
 // If obj is a string, try to read a file of that name.
 // If obj is a []byte, send it directly.
 // If obj is an io.Reader, use it directly.
-// If obj is a runtime.Object, marshal it correctly.
+// If obj is a runtime.Object, marshal it correctly, and set Content-Type header.
 // Otherwise, set an error.
 func (r *Request) Body(obj interface{}) *Request {
 	if r.err != nil {
@@ -466,6 +504,7 @@ func (r *Request) Body(obj interface{}) *Request {
 		}
 		glog.V(8).Infof("Request Body: %s", string(data))
 		r.body = bytes.NewBuffer(data)
+		r.SetHeader("Content-Type", "application/json")
 	default:
 		r.err = fmt.Errorf("unknown type used for body: %+v", obj)
 	}
@@ -611,43 +650,8 @@ func (r *Request) Stream() (io.ReadCloser, error) {
 	}
 }
 
-// Upgrade upgrades the request so that it supports multiplexed bidirectional
-// streams. The current implementation uses SPDY, but this could be replaced
-// with HTTP/2 once it's available, or something else.
-func (r *Request) Upgrade(config *Config, newRoundTripperFunc func(*tls.Config) httpstream.UpgradeRoundTripper) (httpstream.Connection, error) {
-	if r.err != nil {
-		return nil, r.err
-	}
-
-	tlsConfig, err := TLSConfigFor(config)
-	if err != nil {
-		return nil, err
-	}
-
-	upgradeRoundTripper := newRoundTripperFunc(tlsConfig)
-	wrapper, err := HTTPWrappersForConfig(config, upgradeRoundTripper)
-	if err != nil {
-		return nil, err
-	}
-
-	r.client = &http.Client{Transport: wrapper}
-
-	req, err := http.NewRequest(r.verb, r.URL().String(), nil)
-	if err != nil {
-		return nil, fmt.Errorf("Error creating request: %s", err)
-	}
-
-	resp, err := r.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("Error sending request: %s", err)
-	}
-	defer resp.Body.Close()
-
-	return upgradeRoundTripper.NewConnection(resp)
-}
-
 // request connects to the server and invokes the provided function when a server response is
-// received. It handles retry behavior and up front validation of requests. It wil invoke
+// received. It handles retry behavior and up front validation of requests. It will invoke
 // fn at most once. It will return an error if a problem occurred prior to connecting to the
 // server - the provided function is responsible for handling server errors.
 func (r *Request) request(fn func(*http.Request, *http.Response)) error {
@@ -756,7 +760,7 @@ func (r *Request) transformResponse(resp *http.Response, req *http.Request) Resu
 
 	// Did the server give us a status response?
 	isStatusResponse := false
-	var status api.Status
+	var status unversioned.Status
 	if err := r.codec.DecodeInto(body, &status); err == nil && status.Status != "" {
 		isStatusResponse = true
 	}
@@ -773,7 +777,7 @@ func (r *Request) transformResponse(resp *http.Response, req *http.Request) Resu
 
 	// If the server gave us a status back, look at what it was.
 	success := resp.StatusCode >= http.StatusOK && resp.StatusCode <= http.StatusPartialContent
-	if isStatusResponse && (status.Status != api.StatusSuccess && !success) {
+	if isStatusResponse && (status.Status != unversioned.StatusSuccess && !success) {
 		// "Failed" requests are clearly just an error and it makes sense to return them as such.
 		return Result{err: errors.FromObject(&status)}
 	}

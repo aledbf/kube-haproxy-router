@@ -27,7 +27,8 @@ import (
 	"k8s.io/kubernetes/pkg/api"
 	"k8s.io/kubernetes/pkg/api/registered"
 	"k8s.io/kubernetes/pkg/api/resource"
-	"k8s.io/kubernetes/pkg/expapi"
+	"k8s.io/kubernetes/pkg/api/unversioned"
+	"k8s.io/kubernetes/pkg/apis/extensions"
 	"k8s.io/kubernetes/pkg/fields"
 	"k8s.io/kubernetes/pkg/labels"
 	"k8s.io/kubernetes/pkg/runtime"
@@ -54,7 +55,7 @@ func FuzzerFor(t *testing.T, version string, src rand.Source) *fuzz.Fuzzer {
 			j.APIVersion = ""
 			j.Kind = ""
 		},
-		func(j *api.TypeMeta, c fuzz.Continue) {
+		func(j *unversioned.TypeMeta, c fuzz.Continue) {
 			// We have to customize the randomization of TypeMetas because their
 			// APIVersion and Kind must remain blank in memory.
 			j.APIVersion = ""
@@ -70,7 +71,7 @@ func FuzzerFor(t *testing.T, version string, src rand.Source) *fuzz.Fuzzer {
 			var sec, nsec int64
 			c.Fuzz(&sec)
 			c.Fuzz(&nsec)
-			j.CreationTimestamp = util.Unix(sec, nsec).Rfc3339Copy()
+			j.CreationTimestamp = unversioned.Unix(sec, nsec).Rfc3339Copy()
 		},
 		func(j *api.ObjectReference, c fuzz.Continue) {
 			// We have to customize the randomization of TypeMetas because their
@@ -82,7 +83,7 @@ func FuzzerFor(t *testing.T, version string, src rand.Source) *fuzz.Fuzzer {
 			j.ResourceVersion = strconv.FormatUint(c.RandUint64(), 10)
 			j.FieldPath = c.RandString()
 		},
-		func(j *api.ListMeta, c fuzz.Continue) {
+		func(j *unversioned.ListMeta, c fuzz.Continue) {
 			j.ResourceVersion = strconv.FormatUint(c.RandUint64(), 10)
 			j.SelfLink = c.RandString()
 		},
@@ -91,14 +92,20 @@ func FuzzerFor(t *testing.T, version string, src rand.Source) *fuzz.Fuzzer {
 			j.LabelSelector, _ = labels.Parse("a=b")
 			j.FieldSelector, _ = fields.ParseSelector("a=b")
 		},
-		func(j *api.PodSpec, c fuzz.Continue) {
-			c.FuzzNoCustom(j)
+		func(s *api.PodSpec, c fuzz.Continue) {
+			c.FuzzNoCustom(s)
 			// has a default value
 			ttl := int64(30)
 			if c.RandBool() {
 				ttl = int64(c.Uint32())
 			}
-			j.TerminationGracePeriodSeconds = &ttl
+			s.TerminationGracePeriodSeconds = &ttl
+
+			c.Fuzz(s.SecurityContext)
+
+			if s.SecurityContext == nil {
+				s.SecurityContext = new(api.PodSecurityContext)
+			}
 		},
 		func(j *api.PodPhase, c fuzz.Continue) {
 			statuses := []api.PodPhase{api.PodPending, api.PodRunning, api.PodFailed, api.PodUnknown}
@@ -121,15 +128,15 @@ func FuzzerFor(t *testing.T, version string, src rand.Source) *fuzz.Fuzzer {
 			c.FuzzNoCustom(j) // fuzz self without calling this function again
 			//j.TemplateRef = nil // this is required for round trip
 		},
-		func(j *expapi.DeploymentStrategy, c fuzz.Continue) {
+		func(j *extensions.DeploymentStrategy, c fuzz.Continue) {
 			c.FuzzNoCustom(j) // fuzz self without calling this function again
 			// Ensure that strategyType is one of valid values.
-			strategyTypes := []expapi.DeploymentType{expapi.DeploymentRecreate, expapi.DeploymentRollingUpdate}
+			strategyTypes := []extensions.DeploymentStrategyType{extensions.RecreateDeploymentStrategyType, extensions.RollingUpdateDeploymentStrategyType}
 			j.Type = strategyTypes[c.Rand.Intn(len(strategyTypes))]
-			if j.Type != expapi.DeploymentRollingUpdate {
+			if j.Type != extensions.RollingUpdateDeploymentStrategyType {
 				j.RollingUpdate = nil
 			} else {
-				rollingUpdate := expapi.RollingUpdateDeployment{}
+				rollingUpdate := extensions.RollingUpdateDeployment{}
 				if c.RandBool() {
 					rollingUpdate.MaxUnavailable = util.NewIntOrStringFromInt(int(c.RandUint64()))
 					rollingUpdate.MaxSurge = util.NewIntOrStringFromInt(int(c.RandUint64()))
@@ -138,6 +145,13 @@ func FuzzerFor(t *testing.T, version string, src rand.Source) *fuzz.Fuzzer {
 				}
 				j.RollingUpdate = &rollingUpdate
 			}
+		},
+		func(j *extensions.JobSpec, c fuzz.Continue) {
+			c.FuzzNoCustom(j) // fuzz self without calling this function again
+			completions := c.Rand.Int()
+			parallelism := c.Rand.Int()
+			j.Completions = &completions
+			j.Parallelism = &parallelism
 		},
 		func(j *api.List, c fuzz.Continue) {
 			c.FuzzNoCustom(j) // fuzz self without calling this function again
@@ -285,14 +299,19 @@ func FuzzerFor(t *testing.T, version string, src rand.Source) *fuzz.Fuzzer {
 		},
 		func(sc *api.SecurityContext, c fuzz.Continue) {
 			c.FuzzNoCustom(sc) // fuzz self without calling this function again
-			priv := c.RandBool()
-			sc.Privileged = &priv
-			sc.Capabilities = &api.Capabilities{
-				Add:  make([]api.Capability, 0),
-				Drop: make([]api.Capability, 0),
+			if c.RandBool() {
+				priv := c.RandBool()
+				sc.Privileged = &priv
 			}
-			c.Fuzz(&sc.Capabilities.Add)
-			c.Fuzz(&sc.Capabilities.Drop)
+
+			if c.RandBool() {
+				sc.Capabilities = &api.Capabilities{
+					Add:  make([]api.Capability, 0),
+					Drop: make([]api.Capability, 0),
+				}
+				c.Fuzz(&sc.Capabilities.Add)
+				c.Fuzz(&sc.Capabilities.Drop)
+			}
 		},
 		func(e *api.Event, c fuzz.Continue) {
 			c.FuzzNoCustom(e) // fuzz self without calling this function again
@@ -351,10 +370,16 @@ func FuzzerFor(t *testing.T, version string, src rand.Source) *fuzz.Fuzzer {
 			c.FuzzNoCustom(n)
 			n.Spec.ExternalID = "external"
 		},
-		func(s *expapi.APIVersion, c fuzz.Continue) {
+		func(s *extensions.APIVersion, c fuzz.Continue) {
 			// We can't use c.RandString() here because it may generate empty
 			// string, which will cause tests failure.
 			s.APIGroup = "something"
+		},
+		func(s *extensions.HorizontalPodAutoscalerSpec, c fuzz.Continue) {
+			c.FuzzNoCustom(s) // fuzz self without calling this function again
+			minReplicas := c.Rand.Int()
+			s.MinReplicas = &minReplicas
+			s.CPUUtilization = &extensions.CPUTargetUtilization{TargetPercentage: int(c.RandUint64())}
 		},
 	)
 	return f

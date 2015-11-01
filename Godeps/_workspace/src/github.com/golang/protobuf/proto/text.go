@@ -41,6 +41,7 @@ import (
 	"io"
 	"log"
 	"math"
+	"os"
 	"reflect"
 	"sort"
 	"strings"
@@ -282,23 +283,20 @@ func writeStruct(w *textWriter, sv reflect.Value) error {
 				if err := w.WriteByte('\n'); err != nil {
 					return err
 				}
-				// nil values aren't legal, but we can avoid panicking because of them.
-				if val.Kind() != reflect.Ptr || !val.IsNil() {
-					// value
-					if _, err := w.WriteString("value:"); err != nil {
+				// value
+				if _, err := w.WriteString("value:"); err != nil {
+					return err
+				}
+				if !w.compact {
+					if err := w.WriteByte(' '); err != nil {
 						return err
 					}
-					if !w.compact {
-						if err := w.WriteByte(' '); err != nil {
-							return err
-						}
-					}
-					if err := writeAny(w, val, props.mvalprop); err != nil {
-						return err
-					}
-					if err := w.WriteByte('\n'); err != nil {
-						return err
-					}
+				}
+				if err := writeAny(w, val, props.mvalprop); err != nil {
+					return err
+				}
+				if err := w.WriteByte('\n'); err != nil {
+					return err
 				}
 				// close struct
 				w.unindent()
@@ -668,7 +666,10 @@ func writeExtensions(w *textWriter, pv reflect.Value) error {
 
 		pb, err := GetExtension(ep, desc)
 		if err != nil {
-			return fmt.Errorf("failed getting extension: %v", err)
+			if _, err := fmt.Fprintln(os.Stderr, "proto: failed getting extension: ", err); err != nil {
+				return err
+			}
+			continue
 		}
 
 		// Repeated extensions will appear as a slice.

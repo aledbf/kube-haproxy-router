@@ -1,11 +1,31 @@
+# Copyright 2015 The Kubernetes Authors. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 FROM alpine:3.2
+MAINTAINER Manuel Alejandro de Brito Fontes <aledbf@gmail.com>
 
-RUN apk add -U haproxy bash curl
+COPY haproxy.apk /var/cache/apk/haproxy.apk
 
-ADD haproxy-errors /haproxy-errors
+RUN apk add -U pcre bash curl socat lua5.3 && \
+  apk add --allow-untrusted /var/cache/apk/haproxy.apk && \
+  rm -rf /var/cache/apk/*
 
-ADD haproxy/haproxy.tmpl /haproxy.tmpl
+RUN mkdir -p /etc/haproxy/errors /var/state/haproxy
+RUN for ERROR_CODE in 400 403 404 408 500 502 503 504;do curl -sSL -o /etc/haproxy/errors/$ERROR_CODE.http \
+	https://raw.githubusercontent.com/haproxy/haproxy-1.6/master/examples/errorfiles/$ERROR_CODE.http;done
 
-COPY kube-haproxy /kube-haproxy
+ADD haproxy /etc/haproxy
+ADD service_loadbalancer service_loadbalancer
 
-EXPOSE 80 443 2222 1936 8081
+ENTRYPOINT ["/service_loadbalancer"]

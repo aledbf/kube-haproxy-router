@@ -1,6 +1,0 @@
-HTTP/1.0 403 Forbidden
-Cache-Control: no-cache
-Connection: close
-Content-Type: application/json
-
-{ "mensaje" : "Permisos Insuficientes (403 Forbidden)" }

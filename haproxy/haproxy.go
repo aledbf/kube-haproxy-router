@@ -22,70 +22,72 @@ import (
 	"os"
 	"text/template"
 
-	"github.com/aledbf/kube-haproxy-router/cluster"
-
 	"github.com/golang/glog"
 	"k8s.io/kubernetes/pkg/util/exec"
 )
 
-type HAProxyManager struct {
-	Exec       exec.Interface
-	ConfigFile string
-	HTTPPort   int
-	DomainName string
+const (
+	haproxyCfg = "/etc/haproxy/haproxy.cfg"
+	pidFile    = "/var/run/haproxy.pid"
+)
+
+// LoadBalancer represents loadbalancer specific configuration.
+type LoadBalancer struct {
+	Exec        exec.Interface
+	Name        string `description:"Name of the load balancer, eg: haproxy."`
+	StartSyslog bool   `description:"indicates if the load balancer uses syslog."`
+	Algorithm   string `description:"default load balancer algorithm".`
 }
 
-type haproxyTmpl struct {
-	Services   []cluster.Service
-	Nodes      []string
-	DomainName string
-}
-
-func (h *HAProxyManager) buildConf(services []cluster.Service, nodes []string, dryRun bool) error {
+func (h *LoadBalancer) buildConf(dryRun bool) error {
 	var w io.Writer
 	var err error
 	if dryRun {
 		w = os.Stdout
 	} else {
-		w, err = os.Create(h.ConfigFile)
+		w, err = os.Create(haproxyCfg)
 		if err != nil {
 			return err
 		}
 	}
 
-	t, err := template.ParseFiles("haproxy.tmpl")
+	t, err := template.ParseFiles("template.tmpl")
 	if err != nil {
 		return err
 	}
 
-	return t.Execute(w, &haproxyTmpl{
-		Services:   services,
-		Nodes:      nodes,
-		DomainName: h.DomainName,
-	})
+	return t.Execute(w, h.cfg)
 }
 
-func (h *HAProxyManager) Reload() error {
-	pid, err := ioutil.ReadFile("/var/run/haproxy.pid")
+func (h *LoadBalancer) Reload() error {
+	pid, err := ioutil.ReadFile(pidFile)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return h.Start()
 		}
 		return err
 	}
-	return h.runCommandAndLog("haproxy", "-f", h.ConfigFile, "-p", "/var/run/haproxy.pid", "-st", string(pid))
+
+	return h.runCommandAndLog("haproxy", "-f", "-p", pidFile, "-st", string(pid))
 }
 
-func (h *HAProxyManager) Start() error {
-	return h.runCommandAndLog("haproxy", "-f", h.ConfigFile, "-p", "/var/run/haproxy.pid")
+func (h *LoadBalancer) Start() error {
+	if h.cfg.startSyslog {
+		_, err := newSyslogServer("/var/run/haproxy.log.socket")
+		if err != nil {
+			glog.Fatalf("Failed to start syslog server: %v", err)
+		}
+	}
+
+	return h.runCommandAndLog("haproxy", "-f", haproxyCfg, "-p", pidFile)
 }
 
-func (h *HAProxyManager) Check() error {
-	return h.runCommandAndLog("haproxy", "-f", h.ConfigFile, "-c")
+func (h *LoadBalancer) Check() error {
+	return h.runCommandAndLog("haproxy", "-f", haproxyCfg, "-c")
 }
 
-func (h *HAProxyManager) Sync(services []cluster.Service, nodes []string, dryrun bool) error {
-	err := h.buildConf(services, nodes, dryrun)
+func (h *LoadBalancer) Sync(dryrun bool) error {
+	err := h.buildConf(dryrun)
 	if err != nil {
 		return err
 	}
@@ -107,12 +109,13 @@ func (h *HAProxyManager) Sync(services []cluster.Service, nodes []string, dryrun
 	return nil
 }
 
-func (h *HAProxyManager) runCommandAndLog(cmd string, args ...string) error {
+func (h *LoadBalancer) runCommandAndLog(cmd string, args ...string) error {
 	data, err := h.Exec.Command(cmd, args...).CombinedOutput()
 	if err != nil {
 		glog.Warningf("Failed to run: %s %v", cmd, args)
 		glog.Warning(string(data))
 		return err
 	}
+
 	return nil
 }

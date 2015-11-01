@@ -1,6 +1,0 @@
-HTTP/1.0 404 Forbidden
-Cache-Control: no-cache
-Connection: close
-Content-Type: application/json
-
-{ "mensaje" : "El servicio indicado no existe. Contacte al soporte técnico (404 Not Found)" }
